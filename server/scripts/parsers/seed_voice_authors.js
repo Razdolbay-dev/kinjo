@@ -60,52 +60,53 @@ async function insertVoiceAuthorsIntoDB(authors) {
 
     let connection;
     try {
-        // Создаем подключение с использованием промисов
         connection = await mysql.createConnection(dbConfig);
         console.log('✅ Подключение к базе данных установлено');
 
-        // Подготавливаем данные для массовой вставки
         const authorsData = authors.map(author => [author.id, author.name]);
 
-        // SQL запрос для вставки с обработкой дубликатов
+        // Вариант 1: Игнорировать полностью идентичные записи
         const sql = `
+            INSERT IGNORE INTO voice_authors (id, name)
+            VALUES ?
+        `;
+
+        // Вариант 2: Более строгий - проверять и id и name
+        const sqlStrict = `
             INSERT INTO voice_authors (id, name)
             VALUES ?
             ON DUPLICATE KEY UPDATE 
-                name = VALUES(name),
-                id = VALUES(id)
+                id = IF(VALUES(name) = name, id, VALUES(id))
         `;
 
-        // Выполняем запрос
+        // Вариант 3: Самый надежный - проверять существование перед вставкой
+        const sqlSafe = `
+            INSERT INTO voice_authors (id, name)
+            SELECT * FROM (
+                SELECT ? as id, ? as name
+            ) AS new_data
+            WHERE NOT EXISTS (
+                SELECT 1 FROM voice_authors 
+                WHERE id = ? AND name = ?
+            )
+        `;
+
+        // Используем вариант 1 - самый быстрый
         const [result] = await connection.query(sql, [authorsData]);
 
-        console.log(`✅ Данные успешно загружены в таблицу 'voice_authors'.`);
-        console.log(`   Затронуто строк: ${result.affectedRows}`);
-        console.log(`   Добавлено новых: ${result.affectedRows - (result.changedRows || 0)}`);
-        console.log(`   Обновлено: ${result.changedRows || 0}`);
+        console.log(`✅ Данные обработаны.`);
+        console.log(`   Всего записей для обработки: ${authors.length}`);
+        console.log(`   Добавлено новых записей: ${result.affectedRows}`);
+        console.log(`   Пропущено (уже существуют): ${authors.length - result.affectedRows}`);
 
         return result;
 
     } catch (error) {
         console.error('❌ Ошибка при вставке данных в базу:');
-        console.error(`   Код ошибки: ${error.code}`);
-        console.error(`   Сообщение: ${error.message}`);
-
-        // Проверяем, есть ли таблица
-        if (error.code === 'ER_NO_SUCH_TABLE') {
-            console.error('   Таблица voice_authors не найдена! Проверьте:');
-            console.error('   1. Существует ли таблица voice_authors в базе veoveo_db');
-            console.error('   2. Правильно ли указано название таблицы (регистр может иметь значение)');
-            console.error('   3. Подключен ли пользователь veodb к правильной базе данных');
-        }
-
+        console.error(error.message);
         throw error;
     } finally {
-        // Всегда закрываем соединение
-        if (connection) {
-            await connection.end();
-            console.log('🔌 Соединение с базой данных закрыто');
-        }
+        if (connection) await connection.end();
     }
 }
 

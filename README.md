@@ -226,3 +226,23 @@ CREATE TABLE content_voice_author_episodes (
     FOREIGN KEY (vas_id) REFERENCES content_voice_author_seasons(id) ON DELETE CASCADE
 );
 ```
+
+
+ЕСЛИ что-то пошло не так
+```sql
+-- Отключаем проверку внешних ключей для безопасного удаления
+SET FOREIGN_KEY_CHECKS = 0;
+
+-- Удаляем данные из всех таблиц, связанных с контентом
+TRUNCATE TABLE contents;
+TRUNCATE TABLE ratings;
+TRUNCATE TABLE content_genres;
+TRUNCATE TABLE content_countries;
+TRUNCATE TABLE content_voice_authors;
+TRUNCATE TABLE content_seasons;
+TRUNCATE TABLE content_voice_author_seasons;
+TRUNCATE TABLE content_voice_author_episodes;
+
+-- Включаем проверку внешних ключей обратно
+SET FOREIGN_KEY_CHECKS = 1;
+```

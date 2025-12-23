@@ -19,15 +19,17 @@ const dbConfig = {
     queueLimit: 0
 };
 
-const API_URL = 'https://catalog-sync-api.rstprgapipt.com/v1/contents';
 
-// ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =====
+const API_URL = 'https://catalog-sync-api.rstprgapipt.com/v1/contents';
+const PAGE_SIZE = 100;
+
+// ===== ИСПРАВЛЕННЫЕ ФУНКЦИИ =====
 
 /**
- * Получает одну страницу контента из API
+ * Получает страницу контента с указанием номера страницы
  */
-async function fetchContentsPage(page = 1, pageSize = 100) {
-    console.log(`📄 Запрашиваю страницу ${page} (размер: ${pageSize})...`);
+async function fetchContentsPage(page = 1) {
+    console.log(`📄 Запрашиваю страницу ${page}...`);
 
     try {
         const response = await axios.post(API_URL, {
@@ -35,7 +37,8 @@ async function fetchContentsPage(page = 1, pageSize = 100) {
                 type: "page",
                 order: "DESC",
                 sortBy: "year",
-                pageSize: pageSize
+                pageSize: PAGE_SIZE,
+                page: page  // Ключевое исправление: передаем номер страницы!
             }
         }, {
             headers: {
@@ -46,10 +49,15 @@ async function fetchContentsPage(page = 1, pageSize = 100) {
             timeout: 30000
         });
 
-        return {
-            data: response.data.data,
-            meta: response.data.meta
-        };
+        console.log(`✅ Страница ${page} получена: ${response.data.data.length} элементов`);
+
+        // Проверяем, что это действительно новая страница
+        if (response.data.data.length > 0) {
+            const firstItem = response.data.data[0];
+            console.log(`   Первый элемент: ID ${firstItem.id}, "${firstItem.title}"`);
+        }
+
+        return response.data;
     } catch (error) {
         console.error(`❌ Ошибка при запросе страницы ${page}:`);
         if (error.response) {
@@ -61,383 +69,339 @@ async function fetchContentsPage(page = 1, pageSize = 100) {
 }
 
 /**
- * Вставляет основной контент в таблицу contents
+ * Проверяет, был ли контент уже обработан
  */
-async function insertContent(connection, content) {
-    const sql = `
-        INSERT INTO contents (
-            id, title, original_title, poster_url, description, 
-            year, kinopoisk_id, imdb_id, audio_tracks, video_quality,
-            seasons_count, episodes_count, created_at, updated_at, 
-            is_lgbt, player_url
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON DUPLICATE KEY UPDATE
-            title = VALUES(title),
-            original_title = VALUES(original_title),
-            poster_url = VALUES(poster_url),
-            description = VALUES(description),
-            year = VALUES(year),
-            kinopoisk_id = VALUES(kinopoisk_id),
-            imdb_id = VALUES(imdb_id),
-            audio_tracks = VALUES(audio_tracks),
-            video_quality = VALUES(video_quality),
-            seasons_count = VALUES(seasons_count),
-            episodes_count = VALUES(episodes_count),
-            updated_at = VALUES(updated_at),
-            is_lgbt = VALUES(is_lgbt),
-            player_url = VALUES(player_url)
-    `;
-
-    const values = [
-        content.id,
-        content.title || '',
-        content.originalTitle || '',
-        content.posterUrl || '',
-        content.description || '',
-        content.year || null,
-        content.kinopoiskId || null,
-        content.imdbId || null,
-        content.audioTracks || null,
-        content.videoQuality || null,
-        content.seasonsCount || null,
-        content.episodesCount || null,
-        content.createdAt ? new Date(content.createdAt) : null,
-        content.updatedAt ? new Date(content.updatedAt) : null,
-        content.isLgbt || false,
-        content.playerUrl || null
-    ];
-
-    await connection.query(sql, values);
-    return content.id;
+async function isContentProcessed(connection, contentId) {
+    try {
+        const [rows] = await connection.query(
+            'SELECT COUNT(*) as count FROM contents WHERE id = ?',
+            [contentId]
+        );
+        return rows[0].count > 0;
+    } catch (error) {
+        return false;
+    }
 }
 
 /**
- * Вставляет рейтинги в таблицу ratings
+ * Основная функция обработки с защитой от дубликатов
  */
-async function insertRatings(connection, contentId, ratings) {
-    if (!ratings || Object.keys(ratings).length === 0) return;
+async function processAllPages() {
+    console.log('🚀 Начинаю загрузку контента с правильной пагинацией...\n');
+    console.log(`📊 Размер страницы: ${PAGE_SIZE} элементов\n`);
 
-    const ratingValues = [];
-    const ratingSql = `
-        INSERT INTO ratings (content_id, source, rating, votes)
-        VALUES ?
-        ON DUPLICATE KEY UPDATE
-            rating = VALUES(rating),
-            votes = VALUES(votes)
-    `;
+    let connection;
+    let processedIds = new Set(); // Для отслеживания обработанных ID в памяти
+    let totalProcessed = 0;
+    let totalPages = 0;
 
-    for (const [source, data] of Object.entries(ratings)) {
-        if (data && data.rating !== undefined) {
-            ratingValues.push([
-                contentId,
-                source,
-                data.rating,
-                data.votes || null
-            ]);
+    try {
+        connection = await mysql.createConnection(dbConfig);
+        console.log('✅ Подключение к базе данных установлено\n');
+
+        // 1. Получаем первую страницу для определения общего количества
+        console.log('📊 Получаю информацию о количестве страниц...');
+        const firstResponse = await fetchContentsPage(1);
+
+        totalPages = firstResponse.meta.pages;
+        const totalItems = firstResponse.meta.total;
+
+        console.log(`📊 Всего элементов: ${totalItems}`);
+        console.log(`📊 Всего страниц: ${totalPages}\n`);
+
+        if (totalPages === 0) {
+            console.log('❌ API вернул 0 страниц');
+            return;
+        }
+
+        // 2. Сначала проверим, сколько уже есть записей
+        const [existingCount] = await connection.query('SELECT COUNT(*) as count FROM contents');
+        console.log(`📊 Уже загружено записей: ${existingCount[0].count}\n`);
+
+        // 3. Обрабатываем ВСЕ страницы последовательно
+        for (let currentPage = 1; currentPage <= totalPages; currentPage++) {
+            console.log(`\n📖 Страница ${currentPage} из ${totalPages} (${Math.round((currentPage / totalPages) * 100)}%)`);
+
+            const response = await fetchContentsPage(currentPage);
+            const pageData = response.data;
+
+            let pageProcessed = 0;
+            let pageSkipped = 0;
+
+            // Обрабатываем каждый элемент на странице
+            for (const content of pageData) {
+                // Проверяем дубликаты
+                if (processedIds.has(content.id)) {
+                    console.log(`   ⏭️ Пропущен (дубликат в памяти): ID ${content.id}`);
+                    pageSkipped++;
+                    continue;
+                }
+
+                const alreadyInDB = await isContentProcessed(connection, content.id);
+                if (alreadyInDB) {
+                    console.log(`   ⏭️ Пропущен (уже в БД): ID ${content.id}`);
+                    processedIds.add(content.id);
+                    pageSkipped++;
+                    continue;
+                }
+
+                // Обрабатываем новый контент
+                const result = await processContentItem(connection, content);
+
+                if (result.success) {
+                    processedIds.add(content.id);
+                    pageProcessed++;
+                    totalProcessed++;
+
+                    // Выводим прогресс каждые 10 обработанных записей
+                    if (pageProcessed % 10 === 0) {
+                        console.log(`   📈 Обработано на странице: ${pageProcessed}`);
+                    }
+                } else {
+                    console.log(`   ✗ Ошибка: ID ${content.id} - ${result.error}`);
+                }
+            }
+
+            console.log(`   📈 Итог страницы: ${pageProcessed} добавлено, ${pageSkipped} пропущено`);
+
+            // Сохраняем прогресс каждые 50 страниц
+            if (currentPage % 50 === 0) {
+                console.log(`\n💾 Сохраняю прогресс... Всего обработано: ${totalProcessed} записей`);
+            }
+
+            // Пауза между страницами (1.5 секунды)
+            if (currentPage < totalPages) {
+                await new Promise(resolve => setTimeout(resolve, 1500));
+            }
+        }
+
+        // Финальная статистика
+        console.log('\n' + '='.repeat(60));
+        console.log('✅ ЗАГРУЗКА ЗАВЕРШЕНА!');
+        console.log('='.repeat(60));
+        console.log(`📈 Итоговая статистика:`);
+        console.log(`   Всего страниц: ${totalPages}`);
+        console.log(`   Всего элементов в API: ${totalItems}`);
+        console.log(`   Успешно загружено: ${totalProcessed} новых записей`);
+        console.log(`   Уникальных ID в памяти: ${processedIds.size}`);
+
+        // Проверяем итоговое количество в БД
+        const [finalCount] = await connection.query('SELECT COUNT(*) as count FROM contents');
+        console.log(`   Всего записей в базе: ${finalCount[0].count}`);
+
+    } catch (error) {
+        console.error('\n💥 Критическая ошибка:');
+        console.error(error.message);
+        throw error;
+    } finally {
+        if (connection) {
+            await connection.end();
+            console.log('\n🔌 Соединение с базой данных закрыто');
         }
     }
-
-    if (ratingValues.length > 0) {
-        await connection.query(ratingSql, [ratingValues]);
-    }
 }
 
 /**
- * Обрабатывает связи многие-ко-многим для жанров, стран и т.д.
- */
-async function processManyToManyRelations(connection, contentId, items, tableName, itemKey) {
-    if (!items || items.length === 0) return;
-
-    const values = items.map(item => [contentId, item.id]);
-    const sql = `
-        INSERT IGNORE INTO ${tableName} (content_id, ${itemKey}_id)
-        VALUES ?
-    `;
-
-    await connection.query(sql, [values]);
-}
-
-/**
- * Обрабатывает авторов озвучки (voiceAuthorsV2)
- */
-async function processVoiceAuthors(connection, contentId, voiceAuthors) {
-    if (!voiceAuthors || voiceAuthors.length === 0) return;
-
-    const values = voiceAuthors.map(author => [contentId, author.id]);
-    const sql = `
-        INSERT IGNORE INTO content_voice_authors (content_id, voice_author_id)
-        VALUES ?
-    `;
-
-    await connection.query(sql, [values]);
-}
-
-/**
- * Обрабатывает эпизоды по сезонам (episodesBySeason)
- */
-async function processEpisodesBySeason(connection, contentId, episodesBySeason) {
-    if (!episodesBySeason || Object.keys(episodesBySeason).length === 0) return;
-
-    const seasonValues = [];
-    for (const [seasonNumber, episodesCount] of Object.entries(episodesBySeason)) {
-        seasonValues.push([
-            contentId,
-            parseInt(seasonNumber),
-            episodesCount
-        ]);
-    }
-
-    const sql = `
-        INSERT INTO content_seasons (content_id, season_ordering, episodes_count)
-        VALUES ?
-        ON DUPLICATE KEY UPDATE
-            episodes_count = VALUES(episodes_count)
-    `;
-
-    if (seasonValues.length > 0) {
-        await connection.query(sql, [seasonValues]);
-    }
-}
-
-/**
- * Обрабатывает один элемент контента со всеми связями
+ * Обрабатывает один элемент контента (остается без изменений)
  */
 async function processContentItem(connection, content) {
+    const contentId = content.id;
+
     try {
         await connection.beginTransaction();
 
         // 1. Вставляем основной контент
-        const contentId = await insertContent(connection, content);
+        const insertSql = `
+            INSERT INTO contents (
+                id, title, original_title, description, poster_url, year,
+                kinopoisk_id, imdb_id, audio_tracks, video_quality,
+                seasons_count, episodes_count, created_at, updated_at,
+                is_lgbt, player_url
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                title = VALUES(title),
+                original_title = VALUES(original_title),
+                description = VALUES(description),
+                poster_url = VALUES(poster_url),
+                year = VALUES(year),
+                kinopoisk_id = VALUES(kinopoisk_id),
+                imdb_id = VALUES(imdb_id),
+                audio_tracks = VALUES(audio_tracks),
+                video_quality = VALUES(video_quality),
+                seasons_count = VALUES(seasons_count),
+                episodes_count = VALUES(episodes_count),
+                updated_at = VALUES(updated_at),
+                is_lgbt = VALUES(is_lgbt),
+                player_url = VALUES(player_url)
+        `;
 
-        // 2. Вставляем рейтинги
-        await insertRatings(connection, contentId, content.ratings);
+        const values = [
+            content.id,
+            content.title || '',
+            content.originalTitle || null,
+            content.description || null,
+            content.posterUrl || null,
+            content.year || null,
+            content.kinopoiskId || null,
+            content.imdbId || null,
+            content.audioTracks || null,
+            content.videoQuality || null,
+            content.seasonsCount || null,
+            content.episodesCount || null,
+            parseCustomDate(content.createdAt),
+            parseCustomDate(content.updatedAt),
+            parseIsLgbt(content.isLgbt),
+            content.playerUrl || null
+        ];
 
-        // 3. Обрабатываем связи многие-ко-многим
-        await processManyToManyRelations(connection, contentId, content.genres, 'content_genres', 'genre');
-        await processManyToManyRelations(connection, contentId, content.countries, 'content_countries', 'country');
+        await connection.query(insertSql, values);
 
-        // 4. Обрабатываем авторов озвучки
-        await processVoiceAuthors(connection, contentId, content.voiceAuthorsV2);
+        // 2. Рейтинги
+        if (content.ratings && typeof content.ratings === 'object') {
+            const ratingValues = [];
+            for (const [source, data] of Object.entries(content.ratings)) {
+                if (data && typeof data === 'object') {
+                    ratingValues.push([
+                        contentId,
+                        source,
+                        data.rating || 0,
+                        data.votes || 0
+                    ]);
+                }
+            }
 
-        // 5. Обрабатываем эпизоды по сезонам
-        await processEpisodesBySeason(connection, contentId, content.episodesBySeason);
+            if (ratingValues.length > 0) {
+                const ratingSql = `
+                    INSERT INTO ratings (content_id, source, rating, votes)
+                    VALUES ?
+                    ON DUPLICATE KEY UPDATE
+                        rating = VALUES(rating),
+                        votes = VALUES(votes)
+                `;
+                await connection.query(ratingSql, [ratingValues]);
+            }
+        }
+
+        // 3. Жанры
+        if (Array.isArray(content.genres) && content.genres.length > 0) {
+            const genreValues = content.genres.map(genre => [contentId, genre.id]);
+            const genreSql = `INSERT IGNORE INTO content_genres (content_id, genre_id) VALUES ?`;
+            await connection.query(genreSql, [genreValues]);
+        }
+
+        // 4. Страны
+        if (Array.isArray(content.countries) && content.countries.length > 0) {
+            const countryValues = content.countries.map(country => [contentId, country.id]);
+            const countrySql = `INSERT IGNORE INTO content_countries (content_id, country_id) VALUES ?`;
+            await connection.query(countrySql, [countryValues]);
+        }
+
+        // 5. Авторы озвучки
+        if (Array.isArray(content.voiceAuthorsV2) && content.voiceAuthorsV2.length > 0) {
+            const authorValues = content.voiceAuthorsV2
+                .filter(author => author && author.id !== undefined)
+                .map(author => [contentId, author.id]);
+
+            if (authorValues.length > 0) {
+                const authorSql = `INSERT IGNORE INTO content_voice_authors (content_id, voice_author_id) VALUES ?`;
+                await connection.query(authorSql, [authorValues]);
+            }
+        }
+
+        // 6. Эпизоды по сезонам
+        if (content.episodesBySeason && typeof content.episodesBySeason === 'object') {
+            const seasonValues = [];
+            for (const [seasonNumber, episodesCount] of Object.entries(content.episodesBySeason)) {
+                const seasonNum = parseInt(seasonNumber, 10);
+                if (!isNaN(seasonNum) && episodesCount !== undefined) {
+                    seasonValues.push([
+                        contentId,
+                        seasonNum,
+                        episodesCount
+                    ]);
+                }
+            }
+
+            if (seasonValues.length > 0) {
+                const seasonSql = `
+                    INSERT INTO content_seasons (content_id, season_ordering, episodes_count)
+                    VALUES ?
+                    ON DUPLICATE KEY UPDATE
+                        episodes_count = VALUES(episodes_count)
+                `;
+                await connection.query(seasonSql, [seasonValues]);
+            }
+        }
 
         await connection.commit();
         return { success: true, contentId };
 
     } catch (error) {
         await connection.rollback();
-        console.error(`❌ Ошибка при обработке контента ID ${content.id}:`, error.message);
-        return { success: false, error };
+        return { success: false, error: error.message, contentId };
     }
 }
 
-/**
- * Основная функция для обработки всех страниц
- */
-async function processAllPages() {
-    console.log('🚀 Начинаю загрузку контента...\n');
-
-    let connection;
+// ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =====
+function parseCustomDate(dateString) {
+    if (!dateString || typeof dateString !== 'string') return null;
     try {
-        connection = await mysql.createConnection(dbConfig);
-        console.log('✅ Подключение к базе данных установлено\n');
+        const parts = dateString.split(' ');
+        if (parts.length !== 2) return null;
 
-        let currentPage = 1;
-        let totalPages = 1;
-        let totalProcessed = 0;
-        let totalFailed = 0;
-        const pageSize = 100;
+        const dateParts = parts[0].split('.');
+        const timeParts = parts[1].split(':');
 
-        // Получаем первую страницу для определения общего количества страниц
-        const firstPage = await fetchContentsPage(currentPage, pageSize);
-        totalPages = firstPage.meta.pages || 1;
+        if (dateParts.length !== 3) return null;
 
-        console.log(`📊 Всего страниц для обработки: ${totalPages}`);
-        console.log(`📊 Всего элементов: ${firstPage.meta.total || 'неизвестно'}\n`);
+        const day = parseInt(dateParts[0], 10);
+        const month = parseInt(dateParts[1], 10) - 1;
+        const year = parseInt(dateParts[2], 10);
 
-        // Обрабатываем первую страницу
-        let stats = await processPageContents(connection, firstPage.data);
-        totalProcessed += stats.processed;
-        totalFailed += stats.failed;
+        const hours = parseInt(timeParts[0], 10);
+        const minutes = parseInt(timeParts[1], 10);
+        const seconds = timeParts.length > 2 ? parseInt(timeParts[2], 10) : 0;
 
-        // Обрабатываем остальные страницы
-        for (currentPage = 2; currentPage <= totalPages; currentPage++) {
-            console.log(`\n🔄 Обработка страницы ${currentPage} из ${totalPages}...`);
-
-            const pageData = await fetchContentsPage(currentPage, pageSize);
-            const pageStats = await processPageContents(connection, pageData.data);
-
-            totalProcessed += pageStats.processed;
-            totalFailed += pageStats.failed;
-
-            // Небольшая задержка, чтобы не нагружать API
-            await new Promise(resolve => setTimeout(resolve, 500));
-        }
-
-        console.log('\n✅ === ЗАГРУЗКА ЗАВЕРШЕНА ===');
-        console.log('📈 Итоговая статистика:');
-        console.log(`   Обработано страниц: ${totalPages}`);
-        console.log(`   Успешно загружено: ${totalProcessed}`);
-        console.log(`   Ошибок: ${totalFailed}`);
-        console.log(`   Всего элементов: ${totalProcessed + totalFailed}`);
-
-        // Выводим общую статистику
-        await printFinalStatistics(connection);
-
+        return new Date(year, month, day, hours, minutes, seconds);
     } catch (error) {
-        console.error('\n❌ Критическая ошибка при обработке контента:');
-        console.error(error.message);
-        throw error;
-    } finally {
-        if (connection) {
-            await connection.end();
-            console.log('🔌 Соединение с базой данных закрыто');
-        }
+        return null;
     }
 }
 
-/**
- * Обрабатывает содержимое одной страницы
- */
-async function processPageContents(connection, contents) {
-    const stats = {
-        processed: 0,
-        failed: 0
-    };
-
-    for (const content of contents) {
-        console.log(`   Обрабатываю: "${content.title}" (ID: ${content.id})`);
-
-        const result = await processContentItem(connection, content);
-
-        if (result.success) {
-            stats.processed++;
-        } else {
-            stats.failed++;
-        }
-    }
-
-    console.log(`   ✓ Успешно: ${stats.processed}, ✗ Ошибок: ${stats.failed}`);
-    return stats;
-}
-
-/**
- * Выводит итоговую статистику
- */
-async function printFinalStatistics(connection) {
-    console.log('\n📋 Статистика базы данных:');
-
-    try {
-        const queries = [
-            ['contents', 'SELECT COUNT(*) as count FROM contents'],
-            ['ratings', 'SELECT COUNT(*) as count FROM ratings'],
-            ['content_genres', 'SELECT COUNT(*) as count FROM content_genres'],
-            ['content_countries', 'SELECT COUNT(*) as count FROM content_countries'],
-            ['content_voice_authors', 'SELECT COUNT(*) as count FROM content_voice_authors'],
-            ['content_seasons', 'SELECT COUNT(*) as count FROM content_seasons']
-        ];
-
-        for (const [tableName, sql] of queries) {
-            const [result] = await connection.query(sql);
-            console.log(`   ${tableName}: ${result[0].count} записей`);
-        }
-
-        // Пример последних добавленных записей
-        const [latestContents] = await connection.query(`
-            SELECT id, title, year 
-            FROM contents 
-            ORDER BY id DESC 
-            LIMIT 5
-        `);
-
-        console.log('\n🎬 Последние добавленные фильмы:');
-        latestContents.forEach(content => {
-            console.log(`   ${content.id}: "${content.title}" (${content.year})`);
-        });
-
-    } catch (error) {
-        console.error('   Ошибка при получении статистики:', error.message);
-    }
-}
-
-/**
- * Проверяет структуру базы данных перед началом
- */
-async function validateDatabaseStructure() {
-    let connection;
-    try {
-        connection = await mysql.createConnection(dbConfig);
-
-        const requiredTables = [
-            'contents', 'content_genres', 'content_countries',
-            'content_voice_authors', 'content_seasons', 'ratings',
-            'genres', 'countries', 'voice_authors'
-        ];
-
-        console.log('🔍 Проверяю структуру базы данных...');
-
-        for (const table of requiredTables) {
-            const [tables] = await connection.query(
-                "SHOW TABLES LIKE ?", [table]
-            );
-
-            if (tables.length === 0) {
-                console.error(`❌ Таблица "${table}" не найдена!`);
-                console.error(`   Запустите скрипты для заполнения вспомогательных таблиц.`);
-                return false;
-            }
-        }
-
-        console.log('✅ Все необходимые таблицы существуют');
-        return true;
-
-    } catch (error) {
-        console.error('Ошибка при проверке структуры:', error.message);
-        return false;
-    } finally {
-        if (connection) await connection.end();
-    }
+function parseIsLgbt(value) {
+    if (value === null || value === undefined) return false;
+    return Boolean(value);
 }
 
 // ===== ОСНОВНАЯ ЛОГИКА =====
 async function main() {
-    console.log('========================================');
-    console.log(' ЗАГРУЗКА КОНТЕНТА В БАЗУ ДАННЫХ ');
-    console.log('========================================\n');
+    console.log('='.repeat(60));
+    console.log('   ЗАГРУЗКА КОНТЕНТА С ПРАВИЛЬНОЙ ПАГИНАЦИЕЙ');
+    console.log('='.repeat(60));
+    console.log(`   API: ${API_URL}`);
+    console.log(`   PageSize: ${PAGE_SIZE}`);
+    console.log('='.repeat(60) + '\n');
 
     try {
-        // Проверяем структуру базы данных
-        const isValid = await validateDatabaseStructure();
-        if (!isValid) {
-            console.error('\n❌ Прервано: неполная структура базы данных');
-            process.exit(1);
-        }
-
-        // Начинаем загрузку контента
+        // Запускаем загрузку
         await processAllPages();
 
         console.log('\n🎉 Все операции завершены успешно!');
 
     } catch (error) {
-        console.error('\n💥 Скрипт завершился с критической ошибкой:');
+        console.error('\n💥 Скрипт завершился с ошибкой:');
         console.error(error.message);
         process.exit(1);
     }
 }
 
-// Запуск скрипта
+// Запуск
 if (require.main === module) {
-    main().catch(error => {
-        console.error('Непредвиденная ошибка:', error);
-        process.exit(1);
-    });
+    main();
 }
 
-// Экспортируем функции для тестирования
 module.exports = {
     fetchContentsPage,
     processContentItem,
-    processAllPages,
-    validateDatabaseStructure
+    processAllPages
 };

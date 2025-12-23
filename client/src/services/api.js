@@ -83,6 +83,38 @@ export const movieAPI = {
         });
         return response.data;
     },
+
+    // Получить все типы контента
+    getContentTypes: async () => {
+        const response = await api.get('/content-types');
+        return response.data;
+    },
+
+    // Получить контент по типу (slug)
+    getContentByType: async (slug, options = {}) => {
+        const params = {
+            limit: options.limit || 20,
+            offset: options.offset || 0,
+            year: options.year,
+            sort_by: options.sort_by || 'year',
+            sort_order: options.sort_order || 'desc',
+        };
+
+        const response = await api.get(`/content-types/${slug}/contents`, { params });
+        return response.data;
+    },
+
+    // Получить популярные по типу
+    getPopularByType: async (slug, limit = 10) => {
+        const response = await api.get(`/content-types/${slug}/contents`, {
+            params: {
+                limit,
+                sort_by: 'created_at',
+                sort_order: 'desc'
+            }
+        });
+        return response.data;
+    },
 };
 
 export default api;

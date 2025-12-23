@@ -6,7 +6,12 @@ import {
     FiTrendingUp,
     FiStar,
     FiCalendar,
-    FiChevronRight, FiFilm
+    FiChevronRight,
+    FiFilm,
+    FiTv,
+    FiGlobe,
+    FiMusic,
+    FiVideo
 } from 'react-icons/fi';
 import { Link } from 'react-router-dom';
 
@@ -16,15 +21,118 @@ import { LoadingSpinner, SkeletonLoader } from '../components/UI/LoadingSpinner'
 import { movieAPI } from '../services/api';
 import toast from 'react-hot-toast';
 
+// Иконки для типов контента
+const TYPE_ICONS = {
+    'movie': '🎬',
+    'serial': '📺',
+    'anime': '🇯🇵',
+    'multfilm': '🐰',
+    'multserial': '🐭',
+    '3d': '👓',
+    'docmovie': '📽️',
+    'docserial': '📼',
+    'concert': '🎤',
+    'tvshow': '🎥'
+};
+
+// Основные типы для главной страницы
+const MAIN_CONTENT_TYPES = [
+    { id: 4, name: 'Фильмы', slug: 'movie', icon: '🎬' },
+    { id: 2, name: 'Сериалы', slug: 'serial', icon: '📺' },
+    { id: 11, name: 'Аниме', slug: 'anime', icon: '🇯🇵' },
+    { id: 12, name: 'Мультфильмы', slug: 'multfilm', icon: '🐰' },
+    { id: 10, name: 'Мультсериалы', slug: 'multserial', icon: '🐭' },
+    { id: 1, name: '3D', slug: '3d', icon: '👓' },
+    { id: 3, name: 'Докуфильмы', slug: 'docmovie', icon: '📽️' },
+    { id: 5, name: 'Докусериалы', slug: 'docserial', icon: '📼' },
+    { id: 6, name: 'Концерты', slug: 'concert', icon: '🎤' },
+    { id: 7, name: 'ТВ Шоу', slug: 'tvshow', icon: '🎥' }
+];
+
+// Компонент для секции типа контента
+const ContentTypeSection = ({ type }) => {
+    const [typeContent, setTypeContent] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        loadTypeContent();
+    }, [type.slug]);
+
+    const loadTypeContent = async () => {
+        try {
+            const response = await movieAPI.getPopularByType(type.slug, 8);
+            if (response.success && response.data.length > 0) {
+                setTypeContent(response.data);
+            }
+        } catch (error) {
+            console.error(`Error loading ${type.name}:`, error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    if (loading) {
+        return (
+            <section className="container-custom py-8">
+                <div className="flex items-center justify-between mb-6">
+                    <div>
+                        <h2 className="text-2xl font-bold flex items-center gap-3">
+                            <span className="text-2xl">{type.icon}</span>
+                            {type.name}
+                        </h2>
+                    </div>
+                    <div className="animate-pulse bg-gray-800 h-4 w-24 rounded"></div>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6">
+                    <SkeletonLoader type="card" count={5} />
+                </div>
+            </section>
+        );
+    }
+
+    if (typeContent.length === 0) return null;
+
+    return (
+        <section className="container-custom py-8">
+            <div className="flex items-center justify-between mb-6">
+                <Link to={`/type/${type.slug}`} className="group">
+                    <h2 className="text-2xl font-bold flex items-center gap-3 group-hover:text-primary-400 transition-colors">
+                        <span className="text-2xl">{type.icon}</span>
+                        {type.name}
+                    </h2>
+                    <p className="text-gray-400 text-sm mt-1">
+                        Популярные {type.name.toLowerCase()}
+                    </p>
+                </Link>
+                <Link
+                    to={`/type/${type.slug}`}
+                    className="text-primary-400 hover:text-primary-300 flex items-center gap-2 text-sm font-medium"
+                >
+                    Все {type.name.toLowerCase()}
+                    <FiChevronRight className="w-4 h-4" />
+                </Link>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                {typeContent.map((movie) => (
+                    <MovieCard key={movie.id} movie={movie} />
+                ))}
+            </div>
+        </section>
+    );
+};
+
 export const HomePage = () => {
     const [featuredMovies, setFeaturedMovies] = useState([]);
     const [popularMovies, setPopularMovies] = useState([]);
     const [newReleases, setNewReleases] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
+    const [contentTypes, setContentTypes] = useState([]);
 
     useEffect(() => {
         loadData();
+        loadContentTypes();
     }, []);
 
     const loadData = async () => {
@@ -52,13 +160,34 @@ export const HomePage = () => {
         }
     };
 
+    const loadContentTypes = async () => {
+        try {
+            const response = await movieAPI.getContentTypes();
+            if (response.success) {
+                // Сортируем типы по популярности (фильмы и сериалы первые)
+                const sortedTypes = response.data.sort((a, b) => {
+                    const order = { 'movie': 1, 'serial': 2, 'anime': 3, 'multfilm': 4 };
+                    return (order[a.slug] || 99) - (order[b.slug] || 99);
+                });
+                setContentTypes(sortedTypes);
+            }
+        } catch (error) {
+            console.error('Error loading content types:', error);
+        }
+    };
+
     const handleSearch = (query) => {
         if (query.trim()) {
             window.location.href = `/search?q=${encodeURIComponent(query)}`;
         }
     };
 
-    if (loading) {
+    // Фильтруем типы для отображения на главной
+    const displayTypes = contentTypes.filter(type =>
+        MAIN_CONTENT_TYPES.some(mainType => mainType.slug === type.slug)
+    );
+
+    if (loading && !featuredMovies.length) {
         return (
             <div className="min-h-screen">
                 <div className="container-custom py-8">
@@ -162,86 +291,149 @@ export const HomePage = () => {
             {/* Поиск */}
             <section className="container-custom py-12">
                 <div className="max-w-3xl mx-auto text-center">
-                    <h2 className="text-3xl font-bold mb-6">Найдите свой идеальный фильм</h2>
+                    <h2 className="text-3xl font-bold mb-6">Найдите свой идеальный контент</h2>
                     <p className="text-gray-400 mb-8">
-                        Поиск по тысячам фильмов и сериалов. Находите новые шедевры или пересматривайте классику.
+                        Поиск по тысячам фильмов, сериалов, аниме и многого другого. Находите новые шедевры или пересматривайте классику.
                     </p>
                     <SearchBar
                         onSearch={handleSearch}
-                        placeholder="Начните вводить название фильма..."
+                        placeholder="Начните вводить название..."
                         className="max-w-2xl mx-auto"
                     />
                 </div>
             </section>
 
-            {/* Популярные фильмы */}
-            <section className="container-custom py-12">
-                <div className="flex items-center justify-between mb-8">
-                    <div>
-                        <h2 className="text-2xl font-bold flex items-center gap-3">
-                            <FiTrendingUp className="w-6 h-6 text-primary-400" />
-                            Популярное сейчас
-                        </h2>
-                        <p className="text-gray-400 mt-2">Самые просматриваемые фильмы</p>
-                    </div>
-                    <Link
-                        to="/popular"
-                        className="text-primary-400 hover:text-primary-300 flex items-center gap-2"
-                    >
-                        Все популярные
-                        <FiChevronRight className="w-4 h-4" />
-                    </Link>
-                </div>
-
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6">
-                    {popularMovies.map((movie) => (
-                        <MovieCard key={movie.id} movie={movie} />
-                    ))}
-                </div>
-            </section>
-
-            {/* Новинки */}
-            <section className="container-custom py-12">
-                <div className="flex items-center justify-between mb-8">
-                    <div>
-                        <h2 className="text-2xl font-bold flex items-center gap-3">
-                            <FiStar className="w-6 h-6 text-primary-400" />
-                            Новинки
-                        </h2>
-                        <p className="text-gray-400 mt-2">Свежие релизы этого года</p>
-                    </div>
-                    <Link
-                        to="/new"
-                        className="text-primary-400 hover:text-primary-300 flex items-center gap-2"
-                    >
-                        Все новинки
-                        <FiChevronRight className="w-4 h-4" />
-                    </Link>
-                </div>
-
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6">
-                    {newReleases.map((movie) => (
-                        <MovieCard key={movie.id} movie={movie} />
-                    ))}
-                </div>
-            </section>
-
-            {/* Категории */}
-            <section className="container-custom py-12">
-                <h2 className="text-2xl font-bold mb-8">Популярные категории</h2>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                    {['Боевики', 'Комедии', 'Драмы', 'Триллеры', 'Фантастика', 'Ужасы'].map((category) => (
+            {/* Быстрые ссылки на типы контента */}
+            <section className="container-custom py-8 border-t border-gray-800/50">
+                <h2 className="text-2xl font-bold mb-6">Все категории</h2>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+                    {MAIN_CONTENT_TYPES.map((type) => (
                         <Link
-                            key={category}
-                            to={`/category/${category.toLowerCase()}`}
-                            className="glass-effect rounded-xl p-6 text-center hover:bg-gray-800/50 transition-colors group"
+                            key={type.slug}
+                            to={`/type/${type.slug}`}
+                            className="glass-effect rounded-xl p-4 text-center hover:bg-gray-800/50 transition-all duration-300 group hover:scale-[1.02]"
                         >
-                            <div className="w-12 h-12 bg-primary-600/20 rounded-lg flex items-center justify-center mx-auto mb-3 group-hover:bg-primary-600/30 transition-colors">
-                                <FiFilm className="w-6 h-6 text-primary-400" />
+                            <div className="text-3xl mb-2 transform group-hover:scale-110 transition-transform">
+                                {type.icon}
                             </div>
-                            <span className="font-medium">{category}</span>
+                            <span className="font-medium text-sm">{type.name}</span>
                         </Link>
                     ))}
+                </div>
+            </section>
+
+            {/* Популярные фильмы */}
+            {popularMovies.length > 0 && (
+                <section className="container-custom py-8">
+                    <div className="flex items-center justify-between mb-6">
+                        <div>
+                            <h2 className="text-2xl font-bold flex items-center gap-3">
+                                <FiTrendingUp className="w-6 h-6 text-primary-400" />
+                                Популярное сейчас
+                            </h2>
+                            <p className="text-gray-400 text-sm mt-1">Самые просматриваемые фильмы</p>
+                        </div>
+                        <Link
+                            to="/search?sort=popular"
+                            className="text-primary-400 hover:text-primary-300 flex items-center gap-2 text-sm font-medium"
+                        >
+                            Все популярные
+                            <FiChevronRight className="w-4 h-4" />
+                        </Link>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                        {popularMovies.slice(0, 10).map((movie) => (
+                            <MovieCard key={movie.id} movie={movie} />
+                        ))}
+                    </div>
+                </section>
+            )}
+
+            {/* Новинки */}
+            {newReleases.length > 0 && (
+                <section className="container-custom py-8">
+                    <div className="flex items-center justify-between mb-6">
+                        <div>
+                            <h2 className="text-2xl font-bold flex items-center gap-3">
+                                <FiStar className="w-6 h-6 text-primary-400" />
+                                Новинки
+                            </h2>
+                            <p className="text-gray-400 text-sm mt-1">Свежие релизы этого года</p>
+                        </div>
+                        <Link
+                            to="/search?year=2024"
+                            className="text-primary-400 hover:text-primary-300 flex items-center gap-2 text-sm font-medium"
+                        >
+                            Все новинки
+                            <FiChevronRight className="w-4 h-4" />
+                        </Link>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                        {newReleases.slice(0, 10).map((movie) => (
+                            <MovieCard key={movie.id} movie={movie} />
+                        ))}
+                    </div>
+                </section>
+            )}
+
+            {/* Секции по типам контента */}
+            {displayTypes.map((type) => (
+                <ContentTypeSection
+                    key={type.id}
+                    type={{
+                        ...type,
+                        icon: TYPE_ICONS[type.slug] || '🎬'
+                    }}
+                />
+            ))}
+
+            {/* Жанры */}
+            <section className="container-custom py-8 border-t border-gray-800/50">
+                <h2 className="text-2xl font-bold mb-6">Популярные жанры</h2>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                    {[
+                        { name: 'Боевики', icon: '💥', slug: 'action' },
+                        { name: 'Комедии', icon: '😂', slug: 'comedy' },
+                        { name: 'Драмы', icon: '🎭', slug: 'drama' },
+                        { name: 'Триллеры', icon: '🔪', slug: 'thriller' },
+                        { name: 'Фантастика', icon: '👽', slug: 'sci-fi' },
+                        { name: 'Ужасы', icon: '👻', slug: 'horror' },
+                        { name: 'Мелодрамы', icon: '❤️', slug: 'romance' },
+                        { name: 'Детективы', icon: '🕵️', slug: 'mystery' },
+                        { name: 'Приключения', icon: '🗺️', slug: 'adventure' },
+                        { name: 'Фэнтези', icon: '🧙', slug: 'fantasy' },
+                        { name: 'Исторические', icon: '🏛️', slug: 'historical' },
+                        { name: 'Биографии', icon: '📖', slug: 'biography' },
+                    ].map((genre) => (
+                        <Link
+                            key={genre.slug}
+                            to={`/search?genre=${genre.slug}`}
+                            className="glass-effect rounded-xl p-4 text-center hover:bg-gray-800/50 transition-all duration-300 group"
+                        >
+                            <div className="text-2xl mb-2">{genre.icon}</div>
+                            <span className="font-medium text-sm">{genre.name}</span>
+                        </Link>
+                    ))}
+                </div>
+            </section>
+
+            {/* Призыв к действию */}
+            <section className="container-custom py-12">
+                <div className="glass-effect rounded-2xl p-8 md:p-12 text-center">
+                    <h2 className="text-3xl font-bold mb-4">Начните смотреть прямо сейчас</h2>
+                    <p className="text-gray-300 mb-8 max-w-2xl mx-auto">
+                        Присоединяйтесь к миллионам пользователей, которые уже наслаждаются лучшими фильмами и сериалами на MovieHub
+                    </p>
+                    <div className="flex flex-wrap justify-center gap-4">
+                        <button className="btn-primary px-8 py-3">
+                            Начать бесплатно
+                        </button>
+                        <Link to="/search" className="btn-secondary px-8 py-3">
+                            Исследовать каталог
+                        </Link>
+                    </div>
                 </div>
             </section>
         </div>

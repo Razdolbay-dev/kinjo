@@ -6,6 +6,7 @@ require('dotenv').config();
 
 const { testConnection } = require('./config/database');
 const contentRoutes = require('./routes/contentRoutes');
+const contentTypesRoutes = require('./routes/contentTypesRoutes');
 const errorHandler = require('./middlewares/errorHandler');
 const logger = require('./utils/logger');
 
@@ -44,6 +45,8 @@ app.use((req, res, next) => {
 
 // Маршруты
 app.use('/api', contentRoutes);
+
+app.use('/api/content-types', contentTypesRoutes);
 
 // Главная страница
 app.get('/', (req, res) => {

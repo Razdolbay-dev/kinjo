@@ -7,19 +7,20 @@ import { HomePage } from './pages/HomePage';
 import { SearchPage } from './pages/SearchPage';
 import { MovieDetailPage } from './pages/MovieDetailPage';
 import { NotFoundPage } from './pages/NotFoundPage';
+import {ContentTypePage} from "@/pages/ContentTypePage.jsx";
 
 function App() {
   return (
       <HelmetProvider>
         <Router>
           <Layout>
-            <Routes>
-              <Route path="/" element={<HomePage />} />
-              <Route path="/search" element={<SearchPage />} />
-              <Route path="/movie/:id" element={<MovieDetailPage />} />
-              {/* Можно добавить больше маршрутов */}
-              <Route path="*" element={<NotFoundPage />} />
-            </Routes>
+              <Routes>
+                  <Route path="/" element={<HomePage />} />
+                  <Route path="/search" element={<SearchPage />} />
+                  <Route path="/movie/:id" element={<MovieDetailPage />} />
+                  <Route path="/type/:slug" element={<ContentTypePage />} />
+                  <Route path="*" element={<NotFoundPage />} />
+              </Routes>
           </Layout>
           <Toaster
               position="top-right"

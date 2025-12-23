@@ -38,41 +38,39 @@ FLUSH PRIVILEGES;
 1. Основная сущность: contents
 ```sql
 CREATE TABLE contents (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    title VARCHAR(255) NOT NULL,
-    original_title VARCHAR(255) NOT NULL,
-    poster_url VARCHAR(500) NOT NULL,
-    duration INT NOT NULL,
-    description TEXT,
-    year INT NOT NULL,
-    end_year INT,
-    kinopoisk_id INT,
-    imdb_id VARCHAR(50),
-    content_type_id INT NOT NULL,
-    age_restriction VARCHAR(20),
-    cast TEXT,
-    directors TEXT,
-    screenwriters TEXT,
-    producers TEXT,
-    operators TEXT,
-    composers TEXT,
-    artists TEXT,
-    editors TEXT,
-    voice_authors TEXT, -- deprecated
-    audio_tracks TEXT,
-    video_quality VARCHAR(50),
-    seasons_count INT,
-    episodes_count INT,
-    created_at DATETIME,
-    updated_at DATETIME,
-    premiere_at DATETIME,
-    last_season_premiere_at DATETIME,
-    exclusive_start_at DATETIME,
-    exclusive_end_at DATETIME,
-    is_lgbt BOOLEAN DEFAULT FALSE,
-    player_url VARCHAR(500),
-
-    FOREIGN KEY (content_type_id) REFERENCES content_types(id)
+                          id INT PRIMARY KEY,
+                          title VARCHAR(255) NOT NULL,
+                          original_title VARCHAR(255),
+                          description TEXT,
+                          poster_url VARCHAR(500),
+                          year INT,
+                          kinopoisk_id INT,
+                          imdb_id VARCHAR(50),
+                          audio_tracks TEXT,
+                          video_quality VARCHAR(50),
+                          seasons_count INT,
+                          episodes_count INT,
+                          created_at DATETIME,
+                          updated_at DATETIME,
+                          is_lgbt BOOLEAN DEFAULT FALSE,
+                          player_url VARCHAR(500),
+                          content_type_id INT,
+                          age_restriction VARCHAR(20),
+                          cast TEXT,
+                          directors TEXT,
+                          screenwriters TEXT,
+                          producers TEXT,
+                          operators TEXT,
+                          composers TEXT,
+                          artists TEXT,
+                          editors TEXT,
+                          duration INT,
+                          end_year INT,
+                          premiere_at DATETIME,
+                          last_season_premiere_at DATETIME,
+                          exclusive_start_at DATETIME,
+                          exclusive_end_at DATETIME,
+                          FOREIGN KEY (content_type_id) REFERENCES content_types(id)
 );
 ```
 
@@ -88,14 +86,10 @@ CREATE TABLE content_types (
 3. Голосовые актёры (новый формат): voice_authors
 ```sql
 CREATE TABLE voice_authors (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    name VARCHAR(255) NOT NULL
+                               id INT PRIMARY KEY AUTO_INCREMENT,
+                               name VARCHAR(255) NOT NULL
 );
 
-```
-   Связь контент ↔ voice authors (многие-ко-многим):
-
-```sql
 CREATE TABLE content_voice_authors (
     content_id INT NOT NULL,
     voice_author_id INT NOT NULL,

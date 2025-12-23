@@ -1,41 +1,37 @@
-// config/database.js
-const mysql = require('mysql2/promise');
+const { Sequelize } = require('sequelize');
 require('dotenv').config();
 
-const pool = mysql.createPool({
-    host: process.env.DB_HOST || 'localhost',
-    user: process.env.DB_USER || 'veodb',
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME || 'veoveo_db',
-    port: process.env.DB_PORT || 3306,
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0,
-    enableKeepAlive: true,
-    keepAliveInitialDelay: 0
-});
-
-// Утилита для выполнения запросов
-const db = {
-    async execute(sql, params = []) {
-        const connection = await pool.getConnection();
-        try {
-            const [rows] = await connection.execute(sql, params);
-            return [rows];
-        } finally {
-            connection.release();
+const sequelize = new Sequelize(
+    process.env.DB_NAME,
+    process.env.DB_USER,
+    process.env.DB_PASS,
+    {
+        host: process.env.DB_HOST,
+        port: process.env.DB_PORT,
+        dialect: 'mysql',
+        logging: process.env.NODE_ENV === 'development' ? console.log : false,
+        pool: {
+            max: 10,
+            min: 0,
+            acquire: 30000,
+            idle: 10000
+        },
+        define: {
+            timestamps: false,
+            underscored: true
         }
-    },
+    }
+);
 
-    async query(sql, params = []) {
-        const connection = await pool.getConnection();
-        try {
-            const [rows] = await connection.query(sql, params);
-            return rows;
-        } finally {
-            connection.release();
-        }
+// Проверка подключения
+const testConnection = async () => {
+    try {
+        await sequelize.authenticate();
+        console.log('✅ Database connection established successfully.');
+    } catch (error) {
+        console.error('❌ Unable to connect to the database:', error);
+        process.exit(1);
     }
 };
 
-module.exports = db;
+module.exports = { sequelize, testConnection };

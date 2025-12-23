@@ -8,7 +8,7 @@ require('dotenv').config();
 
 // 1. Middleware
 app.use(express.json());
-// Optional: Add CORS middleware here if needed for your API
+// Optional: Add CORS middlewares here if needed for your API
 
 // 2. Serve static files from the React build folder
 // Make sure 'client/build' is the correct path to your built frontend

@@ -8,6 +8,7 @@ import { LoadingSpinner, SkeletonLoader } from '../components/UI/LoadingSpinner'
 import { ErrorMessage } from '../components/UI/ErrorMessage';
 import { movieAPI } from '../services/api';
 import toast from 'react-hot-toast';
+import {MovieCard} from "@/components/Content/MovieCard.jsx";
 
 export const MovieDetailPage = () => {
     const { id } = useParams();

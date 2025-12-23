@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FiImage } from 'react-icons/fio';
+import { FiImage } from 'react-icons/fi';
 
 export const PosterImage = ({
                                 src,

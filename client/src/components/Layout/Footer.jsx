@@ -1,4 +1,4 @@
-import { FiHeart, FiGithub, FiMail, FiTwitter } from 'react-icons/fio';
+import { FiHeart, FiGithub, FiMail, FiTwitter } from 'react-icons/fi';
 import { Link } from 'react-router-dom';
 
 export const Footer = () => {

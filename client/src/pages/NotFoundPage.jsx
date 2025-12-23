@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { FiHome, FiFilm, FiSearch, FiFrown } from 'react-icons/fio';
+import { FiHome, FiFilm, FiSearch, FiFrown } from 'react-icons/fi';
 
 export const NotFoundPage = () => {
     const quickLinks = [

@@ -1,4 +1,4 @@
-import { FiChevronLeft, FiChevronRight } from 'react-icons/fio';
+import { FiChevronLeft, FiChevronRight } from 'react-icons/fi';
 
 export const Pagination = ({
                                currentPage,
